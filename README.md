@@ -40,8 +40,6 @@ python EpsteIn.py --contacts /path/to/Connections.csv
 |------|-------------|
 | `--contacts`, `-c` | Path to LinkedIn Connections.csv export (required) |
 | `--output`, `-o` | Output HTML file path (default: `EpsteIn.html`) |
-| `--min-mentions`, `-m` | Only include contacts with at least N mentions (default: 1) |
-| `--delay`, `-D` | Delay between API requests in seconds (default: 0.2) |
 
 ### Examples
 
@@ -53,11 +51,6 @@ python EpsteIn.py --contacts ~/Downloads/Connections.csv
 Custom output file:
 ```bash
 python EpsteIn.py --contacts ~/Downloads/Connections.csv --output my_report.html
-```
-
-Only show contacts with 5+ mentions:
-```bash
-python EpsteIn.py --contacts ~/Downloads/Connections.csv --min-mentions 5
 ```
 
 ## Reading the Output

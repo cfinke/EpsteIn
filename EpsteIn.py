@@ -243,7 +243,7 @@ def generate_html_report(results, output_path):
 
         if result['hits']:
             for hit in result['hits']:
-                preview = hit.get('content_preview', '') or hit.get('content', '')[:500]
+                preview = hit.get('content_preview') or (hit.get('content') or '')[:500]
                 file_path = hit.get('file_path', '')
                 if file_path:
                     file_path = file_path.replace('dataset', 'DataSet')
@@ -294,20 +294,8 @@ def main():
     )
     parser.add_argument(
         '--output', '-o',
-        default='epstein_mentions_report.html',
-        help='Output HTML file for the report (default: epstein_mentions_report.html)'
-    )
-    parser.add_argument(
-        '--min-mentions', '-m',
-        type=int,
-        default=1,
-        help='Only include contacts with at least this many mentions (default: 1)'
-    )
-    parser.add_argument(
-        '--delay', '-D',
-        type=float,
-        default=0.2,
-        help='Delay between API requests in seconds (default: 0.2)'
+        default='EpsteIn.html',
+        help='Output HTML file for the report (default: EpsteIn.html)'
     )
     args = parser.parse_args()
 
@@ -349,6 +337,8 @@ To export your LinkedIn connections:
     print("Searching Epstein files API...")
     results = []
 
+    delay = 0.25
+
     for i, contact in enumerate(contacts):
         print(f"  [{i+1}/{len(contacts)}] {contact['full_name']}", end='', flush=True)
 
@@ -357,20 +347,19 @@ To export your LinkedIn connections:
 
         print(f" -> {total_mentions} hits")
 
-        if total_mentions >= args.min_mentions:
-            results.append({
-                'name': contact['full_name'],
-                'first_name': contact['first_name'],
-                'last_name': contact['last_name'],
-                'company': contact['company'],
-                'position': contact['position'],
-                'total_mentions': total_mentions,
-                'hits': search_result['hits']
-            })
+        results.append({
+            'name': contact['full_name'],
+            'first_name': contact['first_name'],
+            'last_name': contact['last_name'],
+            'company': contact['company'],
+            'position': contact['position'],
+            'total_mentions': total_mentions,
+            'hits': search_result['hits']
+        })
 
         # Rate limiting
-        if args.delay > 0 and i < len(contacts) - 1:
-            time.sleep(args.delay)
+        if i < len(contacts) - 1:
+            time.sleep(delay)
 
     # Sort by mentions (descending)
     results.sort(key=lambda x: x['total_mentions'], reverse=True)
