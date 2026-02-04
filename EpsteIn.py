@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-LinkedToEpstein: Search Epstein files for mentions of LinkedIn contacts.
+Search Epstein files for mentions of LinkedIn contacts.
 
 Usage:
-    python search_contacts.py --contacts <linkedin_csv> [--output <report.html>]
+    python EpsteIn.py --contacts <linkedin_csv> [--output <report.html>]
 
 Prerequisites:
     pip install requests
@@ -324,7 +324,7 @@ To export your LinkedIn connections:
   9. Download and extract the ZIP file
   10. Use the Connections.csv file with this script:
 
-     python linked_to_epstein.py --contacts /path/to/Connections.csv
+     python EpsteIn.py --contacts /path/to/Connections.csv
 """)
         sys.exit(1)
 
