@@ -1,1 +1,4 @@
 requests>=2.28.0
+fastapi>=0.110.0
+uvicorn>=0.24.0
+python-multipart>=0.0.6

@@ -4,8 +4,9 @@ Search the publicly released Epstein court documents for mentions of your Linked
 
 ## Requirements
 
-- Python 3.6+
-- `requests` library
+- Python 3.8+
+- Dependencies in `requirements.txt`
+- Docker + Docker Compose (optional)
 
 ## Setup
 
@@ -13,6 +14,56 @@ Search the publicly released Epstein court documents for mentions of your Linked
 python3 -m venv project_venv
 source project_venv/bin/activate
 pip install -r requirements.txt
+```
+
+## Run the API
+
+Create a local env file first:
+
+```bash
+cp .env.example .env
+```
+
+```bash
+uvicorn api:app --reload --port 8000
+```
+
+The API auto-loads `.env` at startup. Shell environment variables still take precedence.
+
+`CORS_ALLOW_ORIGINS` must be a comma-separated list of explicit origins (wildcard `*` is rejected).
+
+## Run with Docker
+
+Create your env file:
+
+```bash
+cp .env.example .env
+```
+
+Build and start:
+
+```bash
+docker compose up --build
+```
+
+If your Docker install uses the legacy binary, use:
+
+```bash
+docker-compose up --build
+```
+
+The API will be available at `http://localhost:8000`.
+
+Stop:
+
+```bash
+docker compose down
+```
+
+Legacy binary:
+
+```bash
+docker-compose down
 ```
 
 ## Getting Your LinkedIn Contacts
@@ -28,51 +79,49 @@ pip install -r requirements.txt
 9. Download and extract the ZIP file
 10. Locate the `Connections.csv` file
 
-## Usage
+## API (FastAPI)
+
+### Endpoints
+
+- `GET /health`
+- `POST /search` (multipart form-data, returns JSON)
+- `POST /report` (multipart form-data, returns HTML report)
+
+`POST /search` query params:
+
+- `include_hits` (default: `true`)
+- `max_hits` (optional)
+- `delay_ms` (default: `250`)
+- `max_contacts` (optional)
+
+`POST /report` query params:
+
+- `delay_ms` (default: `250`)
+- `max_contacts` (optional)
+
+### Example (search)
 
 ```bash
-python EpsteIn.py --connections /path/to/Connections.csv
+curl -X POST \
+  -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  -F "file=@/path/to/Connections.csv" \
+  "http://localhost:8000/search?include_hits=true&delay_ms=250"
 ```
 
-### Options
+### Example (HTML report)
 
-| Flag | Description |
-|------|-------------|
-| `--connections`, `-c` | Path to LinkedIn Connections.csv export (required) |
-| `--output`, `-o` | Output HTML file path (default: `EpsteIn.html`) |
-
-### Examples
-
-Basic usage:
 ```bash
-python EpsteIn.py --connections ~/Downloads/Connections.csv
+curl -X POST \
+  -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  -F "file=@/path/to/Connections.csv" \
+  "http://localhost:8000/report" \
+  -o EpsteIn.html
 ```
-
-Custom output file:
-```bash
-python EpsteIn.py --connections ~/Downloads/Connections.csv --output my_report.html
-```
-
-## Reading the Output
-
-The script generates an HTML report (`EpsteIn.html` by default) that you can open in any web browser.
 
 ![A screenshot of the HTML report.](assets/screenshot.png)
-
-The report contains:
-
-- **Summary**: Total contacts searched and how many had mentions
-- **Contact cards**: Each contact with mentions is displayed as a card showing:
-  - Name, position, and company
-  - Total number of mentions across all documents
-  - Excerpts from each matching document
-  - Links to the source PDFs on justice.gov
-
-Contacts are sorted by number of mentions (highest first).
 
 ## Notes
 
 - The search uses exact phrase matching on full names, so "John Smith" won't match documents that only contain "John" or "Smith" separately
 - Common names may produce false positives—review the context excerpts to verify relevance
 - Epstein files indexed by [DugganUSA.com](https://dugganusa.com)
-
