@@ -1,6 +1,6 @@
 ![EpsteIn](assets/logo.png)
 
-Search the publicly released Epstein court documents for mentions of your LinkedIn connections.
+EpsteIn is a FastAPI service that searches publicly released Epstein court document indexes for mentions of names in a LinkedIn `Connections.csv` export.
 
 ## Requirements
 
@@ -8,31 +8,7 @@ Search the publicly released Epstein court documents for mentions of your Linked
 - Dependencies in `requirements.txt`
 - Docker + Docker Compose (optional)
 
-## Setup
-
-```bash
-python3 -m venv project_venv
-source project_venv/bin/activate
-pip install -r requirements.txt
-```
-
-## Run the API
-
-Create a local env file first:
-
-```bash
-cp .env.example .env
-```
-
-```bash
-uvicorn api:app --reload --port 8000
-```
-
-The API auto-loads `.env` at startup. Shell environment variables still take precedence.
-
-`CORS_ALLOW_ORIGINS` must be a comma-separated list of explicit origins (wildcard `*` is rejected).
-
-## Run with Docker
+## Environment Variables
 
 Create your env file:
 
@@ -40,19 +16,33 @@ Create your env file:
 cp .env.example .env
 ```
 
-Build and start:
+Required variables:
+
+- `CORS_ALLOW_ORIGINS`: comma-separated explicit origins (wildcard `*` is rejected)
+- `API_BEARER_TOKEN`: required bearer token for protected endpoints
+
+## Run Locally
+
+```bash
+python3 -m venv project_venv
+source project_venv/bin/activate
+pip install -r requirements.txt
+uvicorn api:app --reload --port 8000
+```
+
+The API auto-loads `.env` at startup. Shell environment variables still take precedence.
+
+## Run with Docker
 
 ```bash
 docker compose up --build
 ```
 
-If your Docker install uses the legacy binary, use:
+If your Docker install uses the legacy binary:
 
 ```bash
 docker-compose up --build
 ```
-
-The API will be available at `http://localhost:8000`.
 
 Stop:
 
@@ -66,40 +56,50 @@ Legacy binary:
 docker-compose down
 ```
 
-## Getting Your LinkedIn Contacts
+## Input CSV
 
-1. Go to [linkedin.com](https://www.linkedin.com) and log in
-2. Click your profile icon in the top right
-3. Select **Settings & Privacy**
-4. Click **Data privacy** in the left sidebar
-5. Under "How LinkedIn uses your data", click **Get a copy of your data**
-6. Select **Connections** (or click "Want something in particular?" and check Connections). If **Connections** isn't listed as an option, choose the **Download larger data archive** option.
-7. Click **Request archive**
-8. Wait for LinkedIn's email (may take up to 24 hours)
-9. Download and extract the ZIP file
-10. Locate the `Connections.csv` file
+The API expects LinkedIn's exported `Connections.csv` file.
 
-## API (FastAPI)
+How to export:
 
-### Endpoints
+1. Go to [linkedin.com](https://www.linkedin.com) and log in.
+2. Open **Settings & Privacy**.
+3. Open **Data privacy**.
+4. Open **Get a copy of your data**.
+5. Request **Connections**.
+6. Download the archive and extract `Connections.csv`.
+
+## API Endpoints
 
 - `GET /health`
 - `POST /search` (multipart form-data, returns JSON)
 - `POST /report` (multipart form-data, returns HTML report)
 
-`POST /search` query params:
+Protected endpoints (`/search`, `/report`) require:
+
+- Header: `Authorization: Bearer <API_BEARER_TOKEN>`
+
+### `POST /search` query params
 
 - `include_hits` (default: `true`)
 - `max_hits` (optional)
 - `delay_ms` (default: `250`)
 - `max_contacts` (optional)
 
-`POST /report` query params:
+### `POST /report` query params
 
 - `delay_ms` (default: `250`)
 - `max_contacts` (optional)
 
-### Example (search)
+## API Examples
+
+Health check:
+
+```bash
+curl "http://localhost:8000/health"
+```
+
+Search:
 
 ```bash
 curl -X POST \
@@ -108,7 +108,7 @@ curl -X POST \
   "http://localhost:8000/search?include_hits=true&delay_ms=250"
 ```
 
-### Example (HTML report)
+HTML report:
 
 ```bash
 curl -X POST \
@@ -122,6 +122,6 @@ curl -X POST \
 
 ## Notes
 
-- The search uses exact phrase matching on full names, so "John Smith" won't match documents that only contain "John" or "Smith" separately
-- Common names may produce false positives—review the context excerpts to verify relevance
-- Epstein files indexed by [DugganUSA.com](https://dugganusa.com)
+- Search uses exact phrase matching on full names.
+- Common names can produce false positives; review preview context.
+- Document index source: [DugganUSA.com](https://dugganusa.com)
