@@ -44,6 +44,9 @@ If your Docker install uses the legacy binary:
 docker-compose up --build
 ```
 
+Docker publishes container port `8000` to `API_HOST_PORT` on your machine (default: `8010`).
+Set `API_HOST_PORT` in `.env` if you need a different host port.
+
 Stop:
 
 ```bash
@@ -117,6 +120,8 @@ curl -X POST \
   "http://localhost:8000/report" \
   -o EpsteIn.html
 ```
+
+If you run via Docker, replace `8000` with your `API_HOST_PORT` value (default `8010`).
 
 ![A screenshot of the HTML report.](assets/screenshot.png)
 
