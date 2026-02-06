@@ -68,31 +68,45 @@ def parse_linkedin_contacts(csv_path):
     return contacts
 
 
-def search_epstein_files(name):
+def search_epstein_files(name, delay):
     """
     Search the Epstein files API for a name.
-    Returns the total number of hits and hit details.
+    Returns (result_dict, delay) where delay may be increased on 429 responses.
     """
     # Wrap name in quotes for exact phrase matching
     quoted_name = f'"{name}"'
     encoded_name = urllib.parse.quote(quoted_name)
     url = f"{API_BASE_URL}?q={encoded_name}&indexes=epstein_files"
 
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+    while True:
+        try:
+            response = requests.get(url, timeout=30)
 
-        if data.get('success'):
-            return {
-                'total_hits': data.get('data', {}).get('totalHits', 0),
-                'hits': data.get('data', {}).get('hits', [])
-            }
-    except requests.exceptions.RequestException as e:
-        print(f"Warning: API request failed for '{name}': {e}", file=sys.stderr)
-        return {'total_hits': 0, 'hits': [], 'error': str(e)}
+            if response.status_code == 429:
+                retry_after = response.headers.get('Retry-After')
 
-    return {'total_hits': 0, 'hits': []}
+                if retry_after:
+                    delay = int(retry_after)
+                else:
+                    delay *= 2
+
+                print(f" [429 rate limited, retrying in {delay}s]", end='', flush=True)
+                time.sleep(delay)
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('success'):
+                return {
+                    'total_hits': data.get('data', {}).get('totalHits', 0),
+                    'hits': data.get('data', {}).get('hits', [])
+                }, delay
+        except requests.exceptions.RequestException as e:
+            print(f"Warning: API request failed for '{name}': {e}", file=sys.stderr)
+            return {'total_hits': 0, 'hits': [], 'error': str(e)}, delay
+
+        return {'total_hits': 0, 'hits': []}, delay
 
 
 def generate_html_report(results, output_path):
@@ -342,7 +356,7 @@ To export your LinkedIn connections:
     for i, contact in enumerate(contacts):
         print(f"  [{i+1}/{len(contacts)}] {contact['full_name']}", end='', flush=True)
 
-        search_result = search_epstein_files(contact['full_name'])
+        search_result, delay = search_epstein_files(contact['full_name'], delay)
         total_mentions = search_result['total_hits']
 
         print(f" -> {total_mentions} hits")
