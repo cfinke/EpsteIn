@@ -37,6 +37,26 @@ static void sigint_handler(int sig) {
     interrupted = 1;
 }
 
+/* ---- Safe allocation wrappers ---- */
+
+static void *xmalloc(size_t size) {
+    void *p = malloc(size);
+    if (!p) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    return p;
+}
+
+static void *xrealloc(void *ptr, size_t size) {
+    void *p = realloc(ptr, size);
+    if (!p) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    return p;
+}
+
+static void *xcalloc(size_t count, size_t size) {
+    void *p = calloc(count, size);
+    if (!p) { fprintf(stderr, "Out of memory\n"); exit(1); }
+    return p;
+}
+
 /* ---- Growable buffer for curl responses ---- */
 
 typedef struct {
@@ -47,7 +67,7 @@ typedef struct {
 
 static void buf_init(Buffer *b) {
     b->cap  = INITIAL_BUF;
-    b->data = malloc(b->cap);
+    b->data = xmalloc(b->cap);
     b->data[0] = '\0';
     b->len  = 0;
 }
@@ -63,7 +83,7 @@ static size_t curl_write_cb(void *ptr, size_t size, size_t nmemb, void *userdata
     Buffer *b = userdata;
     while (b->len + total + 1 > b->cap) {
         b->cap *= 2;
-        b->data = realloc(b->data, b->cap);
+        b->data = xrealloc(b->data, b->cap);
     }
     memcpy(b->data + b->len, ptr, total);
     b->len += total;
@@ -101,7 +121,7 @@ typedef struct {
 
 static char *url_encode(const char *str) {
     size_t len = strlen(str);
-    char *out = malloc(len * 3 + 1);
+    char *out = xmalloc(len * 3 + 1);
     char *p = out;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = str[i];
@@ -119,7 +139,7 @@ static char *url_encode(const char *str) {
 
 static char *url_encode_path(const char *str) {
     size_t len = strlen(str);
-    char *out = malloc(len * 3 + 1);
+    char *out = xmalloc(len * 3 + 1);
     char *p = out;
     for (size_t i = 0; i < len; i++) {
         unsigned char c = str[i];
@@ -157,7 +177,7 @@ static const char b64_table[] =
 
 static char *base64_encode(const unsigned char *data, size_t len) {
     size_t out_len = 4 * ((len + 2) / 3);
-    char *out = malloc(out_len + 1);
+    char *out = xmalloc(out_len + 1);
     char *p = out;
 
     for (size_t i = 0; i < len; i += 3) {
@@ -254,6 +274,7 @@ static int parse_linkedin_contacts(const char *path, Contact **out_contacts) {
     int col_company  = find_column(header_line, "Company");
     int col_position = find_column(header_line, "Position");
     free(header_line);
+    header_line = NULL;
 
     if (col_first < 0 || col_last < 0) {
         fclose(f);
@@ -261,7 +282,7 @@ static int parse_linkedin_contacts(const char *path, Contact **out_contacts) {
     }
 
     int cap = 256, count = 0;
-    Contact *contacts = malloc(cap * sizeof(Contact));
+    Contact *contacts = xmalloc(cap * sizeof(Contact));
 
     while (fgets(line, sizeof(line), f)) {
         size_t len = strlen(line);
@@ -301,7 +322,7 @@ static int parse_linkedin_contacts(const char *path, Contact **out_contacts) {
 
         if (count >= cap) {
             cap *= 2;
-            contacts = realloc(contacts, cap * sizeof(Contact));
+            contacts = xrealloc(contacts, cap * sizeof(Contact));
         }
 
         Contact *c = &contacts[count++];
@@ -335,7 +356,8 @@ static size_t header_cb(char *buffer, size_t size, size_t nitems, void *userdata
 
 /* ---- API search ---- */
 
-static double search_epstein_files(const char *name, double delay, Result *result) {
+static double search_epstein_files(CURL *curl, const char *name, double delay,
+                                    Result *result) {
     char quoted[MAX_FIELD + 4];
     snprintf(quoted, sizeof(quoted), "\"%s\"", name);
 
@@ -347,9 +369,6 @@ static double search_epstein_files(const char *name, double delay, Result *resul
     result->total_mentions = 0;
     result->hits = NULL;
     result->num_hits = 0;
-
-    CURL *curl = curl_easy_init();
-    if (!curl) return delay;
 
     Buffer buf;
     buf_init(&buf);
@@ -381,6 +400,7 @@ static double search_epstein_files(const char *name, double delay, Result *resul
                 delay = retry_after_value;
             else
                 delay *= 2;
+            if (delay > 60) delay = 60;
             printf(" [429 rate limited, retrying in %.0fs]", delay);
             fflush(stdout);
             usleep((unsigned)(delay * 1000000));
@@ -408,7 +428,7 @@ static double search_epstein_files(const char *name, double delay, Result *resul
                 if (cJSON_IsArray(hits_arr)) {
                     int n = cJSON_GetArraySize(hits_arr);
                     if (n > MAX_HITS) n = MAX_HITS;
-                    result->hits = calloc(n, sizeof(Hit));
+                    result->hits = xcalloc(n, sizeof(Hit));
                     result->num_hits = n;
 
                     for (int i = 0; i < n; i++) {
@@ -435,7 +455,6 @@ static double search_epstein_files(const char *name, double delay, Result *resul
     }
 
     buf_free(&buf);
-    curl_easy_cleanup(curl);
     return delay;
 }
 
@@ -464,11 +483,11 @@ static void generate_html_report(Result *results, int num_results,
         fseek(logo_f, 0, SEEK_END);
         long logo_size = ftell(logo_f);
         fseek(logo_f, 0, SEEK_SET);
-        unsigned char *logo_data = malloc(logo_size);
+        unsigned char *logo_data = xmalloc(logo_size);
         if (fread(logo_data, 1, logo_size, logo_f) == (size_t)logo_size) {
             char *b64 = base64_encode(logo_data, logo_size);
             size_t html_len = strlen(b64) + 200;
-            logo_html = malloc(html_len);
+            logo_html = xmalloc(html_len);
             snprintf(logo_html, html_len,
                 "<img src=\"data:image/png;base64,%s\" alt=\"EpsteIn\" class=\"logo\">", b64);
             free(b64);
@@ -568,13 +587,15 @@ static void generate_html_report(Result *results, int num_results,
                 fprintf(f, "</div>\n");
 
                 if (h->file_path[0]) {
-                    /* Replace "dataset" with "DataSet" in path */
+                    /* Replace all "dataset" with "DataSet" in path */
                     char fixed_path[MAX_FIELD];
                     strncpy(fixed_path, h->file_path, MAX_FIELD - 1);
                     fixed_path[MAX_FIELD - 1] = '\0';
-                    char *pos = strstr(fixed_path, "dataset");
-                    if (pos)
+                    char *pos = fixed_path;
+                    while ((pos = strstr(pos, "dataset")) != NULL) {
                         memcpy(pos, "DataSet", 7);
+                        pos += 7;
+                    }
 
                     char *enc_path = url_encode_path(fixed_path);
                     char pdf_url[2048];
@@ -713,12 +734,19 @@ int main(int argc, char *argv[]) {
     sigaction(SIGINT, &sa, NULL);
 
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "Error: Failed to initialize curl\n");
+        free(contacts);
+        curl_global_cleanup();
+        return 1;
+    }
 
     /* Search each contact */
     printf("Searching Epstein files API...\n");
     printf("(Press Ctrl+C to stop and generate a partial report)\n\n");
 
-    Result *results = calloc(num_contacts, sizeof(Result));
+    Result *results = xcalloc(num_contacts, sizeof(Result));
     int num_results = 0;
     double delay = 0.25;
 
@@ -734,7 +762,7 @@ int main(int argc, char *argv[]) {
         strncpy(r->company,    c->company,    MAX_FIELD - 1);
         strncpy(r->position,   c->position,   MAX_FIELD - 1);
 
-        delay = search_epstein_files(c->full_name, delay, r);
+        delay = search_epstein_files(curl, c->full_name, delay, r);
         printf(" -> %d hits\n", r->total_mentions);
         num_results++;
 
@@ -748,6 +776,7 @@ int main(int argc, char *argv[]) {
             printf("No results collected yet. Exiting without generating report.\n");
             free(contacts);
             free(results);
+            curl_easy_cleanup(curl);
             curl_global_cleanup();
             return 0;
         }
@@ -794,6 +823,7 @@ int main(int argc, char *argv[]) {
         free(results[i].hits);
     free(results);
     free(contacts);
+    curl_easy_cleanup(curl);
     curl_global_cleanup();
 
     return 0;
