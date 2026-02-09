@@ -21,6 +21,11 @@ Required variables:
 - `CORS_ALLOW_ORIGINS`: comma-separated explicit origins (wildcard `*` is rejected)
 - `API_BEARER_TOKEN`: required bearer token for protected endpoints
 
+Optional tuning variables:
+
+- `SEARCH_MAX_DURATION_SECONDS`: default max processing time for `/search` and `/report` before returning partial results (default: `85`)
+- `UPSTREAM_TIMEOUT_SECONDS`: timeout per upstream lookup request (default: `15`)
+
 ## Run Locally
 
 ```bash
@@ -88,11 +93,13 @@ Protected endpoints (`/search`, `/report`) require:
 - `max_hits` (optional)
 - `delay_ms` (default: `250`)
 - `max_contacts` (optional)
+- `max_duration_s` (default from `SEARCH_MAX_DURATION_SECONDS`, default value `85`)
 
 ### `POST /report` query params
 
 - `delay_ms` (default: `250`)
 - `max_contacts` (optional)
+- `max_duration_s` (default from `SEARCH_MAX_DURATION_SECONDS`, default value `85`)
 
 ## API Examples
 
@@ -108,7 +115,7 @@ Search:
 curl -X POST \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -F "file=@/path/to/Connections.csv" \
-  "http://localhost:8000/search?include_hits=true&delay_ms=250"
+  "http://localhost:8000/search?include_hits=true&delay_ms=250&max_duration_s=85"
 ```
 
 HTML report:
@@ -117,7 +124,7 @@ HTML report:
 curl -X POST \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -F "file=@/path/to/Connections.csv" \
-  "http://localhost:8000/report" \
+  "http://localhost:8000/report?max_duration_s=85" \
   -o EpsteIn.html
 ```
 
@@ -129,4 +136,5 @@ If you run via Docker, replace `8000` with your `API_HOST_PORT` value (default `
 
 - Search uses exact phrase matching on full names.
 - Common names can produce false positives; review preview context.
+- Large scans can return partial results when `max_duration_s` is reached; check `summary.processed_connections` and `partial` in `/search` responses.
 - Document index source: [DugganUSA.com](https://dugganusa.com)

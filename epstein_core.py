@@ -110,7 +110,7 @@ def normalize_hit(hit):
     }
 
 
-def generate_html_report(results, output_path):
+def generate_html_report(results, output_path, partial_notice=None):
     contacts_with_mentions = len([r for r in results if r['total_mentions'] > 0])
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -121,6 +121,14 @@ def generate_html_report(results, output_path):
         logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="EpsteIn" class="logo">'
     else:
         logo_html = '<h1 class="logo" style="text-align: center;">EpsteIn</h1>'
+
+    partial_notice_html = ""
+    if partial_notice:
+        partial_notice_html = f"""
+    <div class="partial-notice">
+        {html.escape(partial_notice)}
+    </div>
+"""
 
     html_content = f"""<!DOCTYPE html>
 <html lang="en">
@@ -151,6 +159,14 @@ def generate_html_report(results, output_path):
             border-radius: 8px;
             margin-bottom: 30px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .partial-notice {{
+            background: #fff3cd;
+            border: 1px solid #ffe69c;
+            color: #664d03;
+            padding: 14px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
         }}
         .contact {{
             background: #fff;
@@ -227,6 +243,7 @@ def generate_html_report(results, output_path):
 </head>
 <body>
     {logo_html}
+    {partial_notice_html}
 
     <div class="summary">
         <strong>Total connections searched:</strong> {len(results)}<br>

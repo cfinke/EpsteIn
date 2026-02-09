@@ -35,6 +35,7 @@ Bearer token authentication is required for `POST /search` and `POST /report`.
 ## Rate Limiting Behavior
 
 The API calls the upstream Epstein index per contact. The `delay_ms` query parameter adds a pause between calls to reduce upstream load and avoid throttling.
+To reduce reverse-proxy timeouts on large files, requests also use a maximum processing budget (`max_duration_s`).
 
 ## Endpoint: `GET /health`
 
@@ -67,6 +68,7 @@ Query parameters:
 - `max_hits` (integer, optional) to limit hit previews per contact.
 - `delay_ms` (integer, default `250`) delay between upstream API calls.
 - `max_contacts` (integer, optional) to limit number of contacts scanned.
+- `max_duration_s` (number, default from `SEARCH_MAX_DURATION_SECONDS`, default `85`) to stop processing and return partial results before proxy timeout.
 
 Example:
 
@@ -76,7 +78,7 @@ export API_BEARER_TOKEN=replace-with-a-long-random-secret
 curl -X POST \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -F "file=@/path/to/Connections.csv" \
-  "http://localhost:8000/search?include_hits=true&delay_ms=250"
+  "http://localhost:8000/search?include_hits=true&delay_ms=250&max_duration_s=85"
 ```
 
 Response shape:
@@ -85,8 +87,11 @@ Response shape:
 {
   "summary": {
     "total_connections": 123,
+    "processed_connections": 95,
     "connections_with_mentions": 7
   },
+  "partial": true,
+  "detail": "Processing stopped early due to max_duration_s...",
   "results": [
     {
       "name": "Jane Doe",
@@ -112,6 +117,7 @@ Notes:
 
 - `hits` is empty if `include_hits=false`.
 - `error` is a string only if an upstream request failed for that contact.
+- If `partial=true`, only `processed_connections` contacts were scanned before timeout budget was reached.
 
 ## Endpoint: `POST /report`
 
@@ -130,6 +136,7 @@ Query parameters:
 
 - `delay_ms` (integer, default `250`) delay between upstream API calls.
 - `max_contacts` (integer, optional) to limit number of contacts scanned.
+- `max_duration_s` (number, default from `SEARCH_MAX_DURATION_SECONDS`, default `85`) to stop processing and return a partial report before proxy timeout.
 
 Example:
 
@@ -137,7 +144,7 @@ Example:
 curl -X POST \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -F "file=@/path/to/Connections.csv" \
-  "http://localhost:8000/report" \
+  "http://localhost:8000/report?max_duration_s=85" \
   -o EpsteIn.html
 ```
 

@@ -75,8 +75,28 @@ def _load_bearer_token():
     return token
 
 
+def _load_positive_float(name: str, default: float) -> float:
+    raw_value = (os.getenv(name) or "").strip()
+    if not raw_value:
+        return default
+
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive number") from exc
+
+    if value <= 0:
+        raise RuntimeError(f"{name} must be a positive number")
+
+    return value
+
+
 ALLOWED_ORIGINS = _load_allowed_origins()
 API_BEARER_TOKEN = _load_bearer_token()
+DEFAULT_MAX_DURATION_SECONDS = _load_positive_float(
+    "SEARCH_MAX_DURATION_SECONDS", 85.0
+)
+UPSTREAM_TIMEOUT_SECONDS = _load_positive_float("UPSTREAM_TIMEOUT_SECONDS", 15.0)
 
 app.add_middleware(
     CORSMiddleware,
@@ -122,12 +142,29 @@ def _load_contacts_from_upload(upload: UploadFile):
     return parse_linkedin_contacts_stream(io.StringIO(text))
 
 
-def _search_contacts(contacts, delay_ms, include_hits, max_hits: Optional[int]):
+def _search_contacts(
+    contacts,
+    delay_ms,
+    include_hits,
+    max_hits: Optional[int],
+    max_duration_s: Optional[float],
+):
     results = []
     delay = max(delay_ms, 0) / 1000.0
+    processed_contacts = 0
+    timed_out = False
+    deadline = None if max_duration_s is None else time.monotonic() + max_duration_s
 
     for i, contact in enumerate(contacts):
-        search_result = search_epstein_files(contact['full_name'])
+        timeout_seconds = UPSTREAM_TIMEOUT_SECONDS
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 1.0:
+                timed_out = True
+                break
+            timeout_seconds = max(1.0, min(UPSTREAM_TIMEOUT_SECONDS, remaining - 1.0))
+
+        search_result = search_epstein_files(contact['full_name'], timeout=timeout_seconds)
         total_mentions = search_result['total_hits']
         hits = search_result.get('hits') or []
         error = search_result.get('error')
@@ -145,12 +182,22 @@ def _search_contacts(contacts, delay_ms, include_hits, max_hits: Optional[int]):
             'hits': [normalize_hit(h) for h in hits] if include_hits else [],
             'error': error,
         })
+        processed_contacts += 1
 
         if i < len(contacts) - 1 and delay > 0:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= delay + 1.0:
+                    timed_out = True
+                    break
             time.sleep(delay)
 
     results.sort(key=lambda x: x['total_mentions'], reverse=True)
-    return results
+    return {
+        "results": results,
+        "processed_contacts": processed_contacts,
+        "timed_out": timed_out,
+    }
 
 
 @app.get("/health")
@@ -165,6 +212,12 @@ def search(
     max_hits: Optional[int] = Query(None, ge=1, description="Limit hit previews per contact"),
     delay_ms: int = Query(250, ge=0, le=5000, description="Delay between API calls in ms"),
     max_contacts: Optional[int] = Query(None, ge=1, description="Limit number of contacts to scan"),
+    max_duration_s: Optional[float] = Query(
+        DEFAULT_MAX_DURATION_SECONDS,
+        ge=5,
+        le=600,
+        description="Max processing time in seconds before returning partial results",
+    ),
 ):
     try:
         ensure_requests()
@@ -182,16 +235,29 @@ def search(
     if max_contacts is not None:
         contacts = contacts[:max_contacts]
 
-    results = _search_contacts(contacts, delay_ms, include_hits, max_hits)
+    search_response = _search_contacts(
+        contacts, delay_ms, include_hits, max_hits, max_duration_s
+    )
+    results = search_response["results"]
+    processed_contacts = search_response["processed_contacts"]
+    timed_out = search_response["timed_out"]
     contacts_with_mentions = len([r for r in results if r['total_mentions'] > 0])
 
-    return {
+    payload = {
         "summary": {
             "total_connections": len(contacts),
+            "processed_connections": processed_contacts,
             "connections_with_mentions": contacts_with_mentions,
         },
         "results": results,
     }
+    if timed_out:
+        payload["partial"] = True
+        payload["detail"] = (
+            "Processing stopped early due to max_duration_s. "
+            "Lower max_contacts or increase max_duration_s to scan more connections."
+        )
+    return payload
 
 
 @app.post("/report", response_class=HTMLResponse)
@@ -199,6 +265,12 @@ def report(
     file: UploadFile = File(...),
     delay_ms: int = Query(250, ge=0, le=5000, description="Delay between API calls in ms"),
     max_contacts: Optional[int] = Query(None, ge=1, description="Limit number of contacts to scan"),
+    max_duration_s: Optional[float] = Query(
+        DEFAULT_MAX_DURATION_SECONDS,
+        ge=5,
+        le=600,
+        description="Max processing time in seconds before returning partial results",
+    ),
 ):
     try:
         ensure_requests()
@@ -216,13 +288,23 @@ def report(
     if max_contacts is not None:
         contacts = contacts[:max_contacts]
 
-    results = _search_contacts(contacts, delay_ms, include_hits=True, max_hits=None)
+    search_response = _search_contacts(
+        contacts, delay_ms, include_hits=True, max_hits=None, max_duration_s=max_duration_s
+    )
+    results = search_response["results"]
+    timed_out = search_response["timed_out"]
+    partial_notice = None
+    if timed_out:
+        partial_notice = (
+            "This report is partial because processing hit max_duration_s. "
+            "Use a lower max_contacts value or increase max_duration_s."
+        )
 
     with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
         tmp_path = tmp.name
 
     try:
-        generate_html_report(results, tmp_path)
+        generate_html_report(results, tmp_path, partial_notice=partial_notice)
         with open(tmp_path, 'r', encoding='utf-8') as f:
             html_content = f.read()
     finally:
