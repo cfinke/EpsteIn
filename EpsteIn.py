@@ -15,6 +15,7 @@ import csv
 import html
 import os
 import sys
+import threading
 import time
 import urllib.parse
 
@@ -77,6 +78,44 @@ def parse_linkedin_contacts(csv_path):
     return contacts
 
 
+def _request_with_spinner(url, timeout=30):
+    """Make an HTTP GET request with a spinner animation while waiting."""
+    result = {}
+
+    def do_request():
+        try:
+            result['response'] = requests.get(url, timeout=timeout)
+        except Exception as e:
+            result['error'] = e
+
+    thread = threading.Thread(target=do_request)
+    thread.start()
+
+    spinner = '|/-\\'
+    i = 0
+    while thread.is_alive():
+        print(f' {spinner[i % len(spinner)]}', end='\b\b', flush=True)
+        time.sleep(0.15)
+        i += 1
+        thread.join(timeout=0)
+
+    print('  ', end='\b\b', flush=True)  # clear spinner
+
+    if 'error' in result:
+        raise result['error']
+    return result['response']
+
+
+def _countdown_sleep(seconds):
+    """Sleep with a visible second-by-second countdown."""
+    seconds = int(seconds)
+    if seconds <= 0:
+        return
+    for remaining in range(seconds, 0, -1):
+        print(f"{remaining}...", end='', flush=True)
+        time.sleep(1)
+
+
 def search_epstein_files(name, delay):
     """
     Search the Epstein files API for a name.
@@ -93,12 +132,12 @@ def search_epstein_files(name, delay):
 
     for attempt in range(MAX_RETRIES + 1):
         try:
-            response = requests.get(url, timeout=30)
+            response = _request_with_spinner(url, timeout=30)
 
             # Handle 429 Rate Limiting
             if response.status_code == 429:
                 if attempt >= MAX_RETRIES:
-                    print(f" [429 rate limited, max retries exhausted]", end='', flush=True)
+                    print(f" | HTTP 429 | FAILED after {MAX_RETRIES} retries", end='', flush=True)
                     last_error = "429 Too Many Requests"
                     break
 
@@ -114,20 +153,21 @@ def search_epstein_files(name, delay):
                     wait_time = delay
 
                 wait_time = min(wait_time, MAX_BACKOFF_DELAY)
-                print(f" [429 rate limited, retry {attempt + 1}/{MAX_RETRIES} in {wait_time}s]", end='', flush=True)
-                time.sleep(wait_time)
+                retry_hdr = f"Retry-After: {retry_after}" if retry_after else f"delay={wait_time}s"
+                print(f" | HTTP 429 | {retry_hdr} | attempt {attempt + 1}/{MAX_RETRIES} | waiting ", end='', flush=True)
+                _countdown_sleep(wait_time)
                 continue
 
             # Handle 5xx Server Errors
             if response.status_code >= 500:
                 if attempt >= MAX_RETRIES:
-                    print(f" [server error {response.status_code}, max retries exhausted]", end='', flush=True)
+                    print(f" | HTTP {response.status_code} | FAILED after {MAX_RETRIES} retries", end='', flush=True)
                     last_error = f"HTTP {response.status_code}"
                     break
 
                 retry_delay = min(INITIAL_RETRY_DELAY * (2 ** attempt), MAX_BACKOFF_DELAY)
-                print(f" [server error {response.status_code}, retry {attempt + 1}/{MAX_RETRIES} in {retry_delay}s]", end='', flush=True)
-                time.sleep(retry_delay)
+                print(f" | HTTP {response.status_code} | backoff={retry_delay}s | attempt {attempt + 1}/{MAX_RETRIES} | waiting ", end='', flush=True)
+                _countdown_sleep(retry_delay)
                 continue
 
             # Handle other HTTP errors (4xx except 429)
@@ -137,6 +177,8 @@ def search_epstein_files(name, delay):
             data = response.json()
 
             if data.get('success'):
+                if attempt > 0:
+                    print(f" | recovered on attempt {attempt + 1}", end='', flush=True)
                 return {
                     'total_hits': data.get('data', {}).get('totalHits', 0),
                     'hits': data.get('data', {}).get('hits', [])
@@ -148,16 +190,16 @@ def search_epstein_files(name, delay):
             last_error = str(e)
 
             if attempt >= MAX_RETRIES:
-                print(f" [{type(e).__name__}, max retries exhausted]", end='', flush=True)
+                print(f" | {type(e).__name__} | FAILED after {MAX_RETRIES} retries", end='', flush=True)
                 break
 
             retry_delay = min(INITIAL_RETRY_DELAY * (2 ** attempt), MAX_BACKOFF_DELAY)
-            print(f" [{type(e).__name__}, retry {attempt + 1}/{MAX_RETRIES} in {retry_delay}s]", end='', flush=True)
-            time.sleep(retry_delay)
+            print(f" | {type(e).__name__} | backoff={retry_delay}s | attempt {attempt + 1}/{MAX_RETRIES} | waiting ", end='', flush=True)
+            _countdown_sleep(retry_delay)
             continue
 
         except requests.exceptions.RequestException as e:
-            print(f" [error: {e}]", end='', flush=True)
+            print(f" | ERROR: {type(e).__name__}: {e}", end='', flush=True)
             return {'total_hits': 0, 'hits': [], 'error': str(e)}, delay
 
     # All retries exhausted
