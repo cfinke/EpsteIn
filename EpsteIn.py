@@ -106,6 +106,11 @@ def search_epstein_files(name, delay):
                     'total_hits': data.get('data', {}).get('totalHits', 0),
                     'hits': data.get('data', {}).get('hits', [])
                 }, delay
+        except requests.exceptions.ConnectTimeout:
+            delay *= 2
+            print(f" [connect timeout, retrying in {delay}s]", end='', flush=True)
+            time.sleep(delay)
+            continue
         except requests.exceptions.RequestException as e:
             print(f"Warning: API request failed for '{name}': {e}", file=sys.stderr)
             return {'total_hits': 0, 'hits': [], 'error': str(e)}, delay
