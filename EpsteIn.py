@@ -12,7 +12,9 @@ Prerequisites:
 import argparse
 import base64
 import csv
+from datetime import datetime
 import html
+import json
 import os
 import sys
 import time
@@ -27,6 +29,21 @@ except ImportError:
 API_BASE_URL = "https://analytics.dugganusa.com/api/v1/search"
 PDF_BASE_URL = "https://www.justice.gov/epstein/files/"
 API_KEY_PATH = os.path.join(os.getcwd(), ".epstein_api_key")
+CACHE_PATH = os.path.join(os.getcwd(), ".epstein_cache.json")
+
+
+def load_cache():
+    """Load cached search results from disk."""
+    if os.path.exists(CACHE_PATH):
+        with open(CACHE_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_cache(cache):
+    """Write cached search results to disk."""
+    with open(CACHE_PATH, 'w', encoding='utf-8') as f:
+        json.dump(cache, f, indent=2, ensure_ascii=False)
 
 
 def get_api_key():
@@ -389,10 +406,22 @@ To export your LinkedIn connections:
     # Get API key (prompts user if not stored)
     api_key = get_api_key()
 
+    # Load cached results from previous runs
+    cache = load_cache()
+
+    # Sort contacts: never-searched first, then oldest-searched first
+    def sort_key(contact):
+        cached = cache.get(contact['full_name'])
+        if cached is None:
+            return (0, '')  # Never searched — highest priority
+        return (1, cached.get('last_searched', ''))
+
+    contacts.sort(key=sort_key)
+
     # Search for each contact
     print("Searching Epstein files API...")
     print("(Press Ctrl+C to stop and generate a partial report)\n")
-    results = []
+    searched_this_run = set()
 
     delay = 0.25
 
@@ -400,20 +429,31 @@ To export your LinkedIn connections:
         for i, contact in enumerate(contacts):
             print(f"  [{i+1}/{len(contacts)}] {contact['full_name']}", end='', flush=True)
 
+            # Skip contacts searched in the last 23 hours
+            cached_entry = cache.get(contact['full_name'])
+            if cached_entry and 'last_searched' in cached_entry:
+                age = datetime.now() - datetime.fromisoformat(cached_entry['last_searched'])
+                if age.total_seconds() < 23 * 3600:
+                    print(f" -> skipped (cached {age.total_seconds() / 3600:.1f}h ago)")
+                    continue
+
             search_result, delay = search_epstein_files(contact['full_name'], delay, api_key)
             total_mentions = search_result['total_hits']
 
             print(f" -> {total_mentions} hits")
 
-            results.append({
-                'name': contact['full_name'],
+            # Update cache immediately so interrupted runs keep progress
+            cache[contact['full_name']] = {
+                'last_searched': datetime.now().isoformat(),
+                'total_hits': total_mentions,
+                'hits': search_result['hits'],
                 'first_name': contact['first_name'],
                 'last_name': contact['last_name'],
                 'company': contact['company'],
                 'position': contact['position'],
-                'total_mentions': total_mentions,
-                'hits': search_result['hits']
-            })
+            }
+            save_cache(cache)
+            searched_this_run.add(contact['full_name'])
 
             # Rate limiting
             if i < len(contacts) - 1:
@@ -421,10 +461,37 @@ To export your LinkedIn connections:
 
     except KeyboardInterrupt:
         print("\n\nSearch interrupted by user (Ctrl+C).")
-        if not results:
-            print("No results collected yet. Exiting without generating report.")
-            sys.exit(0)
-        print(f"Generating partial report with {len(results)} of {len(contacts)} contacts searched...")
+
+    # Build results: fresh searches + cached entries for remaining contacts
+    fresh_count = len(searched_this_run)
+    cached_count = 0
+    results = []
+
+    for contact in contacts:
+        name = contact['full_name']
+        if name in searched_this_run:
+            entry = cache[name]
+        elif name in cache:
+            entry = cache[name]
+            cached_count += 1
+        else:
+            continue
+
+        results.append({
+            'name': name,
+            'first_name': entry['first_name'],
+            'last_name': entry['last_name'],
+            'company': entry['company'],
+            'position': entry['position'],
+            'total_mentions': entry['total_hits'],
+            'hits': entry['hits'],
+        })
+
+    print(f"\n{fresh_count} contacts searched fresh, {cached_count} loaded from cache.")
+
+    if not results:
+        print("No results collected yet. Exiting without generating report.")
+        sys.exit(0)
 
     # Sort by mentions (descending)
     results.sort(key=lambda x: x['total_mentions'], reverse=True)
